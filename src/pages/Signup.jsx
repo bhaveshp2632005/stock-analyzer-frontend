@@ -11,6 +11,7 @@ const Signup = () => {
   const navigate = useNavigate();
   const { isDark, toggle } = useTheme();
   const t = tokens(isDark);
+  const BASE = import.meta.env.VITE_API_URL;
 
   useEffect(() => { if(validateToken()) navigate("/dashboard",{replace:true}); }, [navigate]);
 
@@ -22,7 +23,7 @@ const Signup = () => {
     e.preventDefault(); setError("");
     try {
       setLoading(true);
-      const res = await axios.post("http://localhost:5000/api/auth/signup", form);
+      const res = await axios.post(`${BASE}/auth/signup`, form);
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("user",  JSON.stringify(res.data.user));
       navigate("/dashboard",{replace:true});
