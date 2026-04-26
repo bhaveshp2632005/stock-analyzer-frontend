@@ -1,6 +1,7 @@
 /**
  * Dashboard.jsx — Full 3D Premium Design
  * Glassmorphism + Layered depth + Neon accents + Perspective tilt
+ * Updated: MarketIndices now uses the same /stock/:symbol API (no new backend routes)
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -29,12 +30,25 @@ const POPULAR = [
   { symbol:"NVDA",  name:"NVIDIA",    logo:"🟢" },
 ];
 
-const MOVERS_BG_INTERVAL = 2 * 60 * 1000;
+// ── Indian market indices — fetched via the same /stock/:symbol endpoint ──
+const INDEX_META = [
+  { symbol: "^NSEI",    name: "NIFTY 50",   flag: "🇮🇳", cur: "₹" },
+  { symbol: "^BSESN",   name: "SENSEX",     flag: "🇮🇳", cur: "₹" },
+  { symbol: "^NSEBANK", name: "BANK NIFTY", flag: "🇮🇳", cur: "₹" },
+];
+
+const MOVERS_BG_INTERVAL   = 2 * 60 * 1000;
+const INDICES_INTERVAL_MS  = 15 * 1000;          // refresh every 15s (same as before)
 
 const fmtPrice = (price, currency) =>
   currency === "INR"
     ? "₹" + Number(price).toLocaleString("en-IN", { minimumFractionDigits: 2 })
     : "$" + Number(price).toFixed(2);
+
+const fmtIdx = (val, cur) =>
+  cur === "₹"
+    ? "₹" + Number(val).toLocaleString("en-IN", { minimumFractionDigits: 2 })
+    : "$" + Number(val).toLocaleString("en-US", { minimumFractionDigits: 2 });
 
 /* ── 3D mouse-tilt hook ── */
 const useTilt = (strength = 8) => {
@@ -51,6 +65,77 @@ const useTilt = (strength = 8) => {
       ref.current.style.transform = "perspective(900px) rotateX(0) rotateY(0) translateZ(0)";
   };
   return { ref, onMouseMove, onMouseLeave };
+};
+
+/* ════════════════════════════════════════════════════════════════
+   useIndicesFromStockAPI
+   ─────────────────────────────────────────────────────────────
+   Fetches each index symbol via the SAME /stock/:symbol/quick
+   endpoint used by the popular stocks grid.
+   No new backend routes required.
+════════════════════════════════════════════════════════════════ */
+const useIndicesFromStockAPI = (intervalMs = INDICES_INTERVAL_MS) => {
+  const [data,    setData]    = useState({});   // keyed by symbol
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState("");
+  const mounted = useRef(true);
+const fetchAll = useCallback(async (isInitial = false) => {
+  if (isInitial) setLoading(true);
+
+  try {
+    const results = await Promise.allSettled(
+      INDEX_META.map(({ symbol }) => {
+        const isIndex = symbol.startsWith("^");
+
+        const url = isIndex
+          ? `/indices/${symbol}`
+          : `/stock/${symbol}/quick`;
+
+        const key = isIndex
+          ? `index:${symbol}`
+          : `quick:${symbol}`;
+
+        return api.cachedGet(url, key, TTL.stock);
+      })
+    );
+
+    if (!mounted.current) return;
+
+    const next = {};
+
+    results.forEach((res, i) => {
+      if (res.status === "fulfilled" && res.value) {
+        next[INDEX_META[i].symbol] = res.value;
+      }
+    });
+
+    const anySuccess = Object.keys(next).length > 0;
+
+    if (anySuccess) {
+      setData(prev => ({ ...prev, ...next }));
+      setError("");
+    } else {
+      setError("Could not load market indices");
+    }
+
+  } catch (e) {
+    if (mounted.current) {
+      setError(e?.message || "Failed to load market indices");
+    }
+  } finally {
+    if (isInitial && mounted.current) setLoading(false);
+  }
+}, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    fetchAll(true);
+    const id = setInterval(() => fetchAll(false), intervalMs);
+    return () => { mounted.current = false; clearInterval(id); };
+  }, [fetchAll, intervalMs]);
+
+  const refresh = useCallback(() => fetchAll(false), [fetchAll]);
+  return { data, loading, error, refresh };
 };
 
 /* ── Dashboard ── */
@@ -188,8 +273,10 @@ const Dashboard = () => {
         @keyframes number-count  { from{opacity:0;transform:translateY(10px) scale(0.85)} to{opacity:1;transform:translateY(0) scale(1)} }
         @keyframes badge-in      { from{transform:scale(0.7) rotate(-8deg);opacity:0} to{transform:scale(1) rotate(0);opacity:1} }
         @keyframes glow-pulse    { 0%,100%{opacity:0.5} 50%{opacity:1} }
+        @keyframes idx-fade-in   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
         .dash-card-hover:hover   { transform:translateY(-4px) !important; }
         .dash-card-hover:hover .card-scan { animation:scan-line 2s linear infinite !important; opacity:.4 !important; }
+        .idx-card-hover:hover    { transform:translateY(-3px) scale(1.015) !important; }
       `}</style>
 
       {/* ══════════════════════════════════
@@ -234,6 +321,13 @@ const Dashboard = () => {
           { icon:<Zap size={18}/>,          label:"Avg Confidence", value:avgConf ? avgConf+"%" : "0%",color:"#a78bfa", sub:"AI confidence"  },
         ].map((s,i) => <StatCard3D key={i} {...s} isDark={isDark} t={t} delay={i*0.07}/>)}
       </div>
+
+      {/* ══════════════════════════════════
+          MARKET INDICES
+          Uses the same /stock/:symbol/quick
+          endpoint — no new backend routes
+      ══════════════════════════════════ */}
+      <MarketIndices t={t} isDark={isDark} onAnalyze={goAnalyze} />
 
       {/* ══════════════════════════════════
           SEARCH + POPULAR STOCKS
@@ -592,6 +686,283 @@ const Dashboard = () => {
     {/* ── Alert toast notifications (fixed, outside AppShell flow) ── */}
     <NotificationStack toasts={toasts} onDismiss={dismiss} theme={tokens(theme)}/>
   </>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════
+   MARKET INDICES SECTION
+   ──────────────────────────────────────────────────────────────
+   Uses the SAME /stock/:symbol/quick endpoint as popular stocks.
+   No new backend routes. Symbols: ^NSEI, ^BSESN, ^NSEBANK
+   Auto-refreshes every 15 s via useIndicesFromStockAPI hook.
+══════════════════════════════════════════════════════════════ */
+const MarketIndices = ({ t, isDark, onAnalyze }) => {
+  const { data, loading, error, refresh } = useIndicesFromStockAPI();
+  const [idxRefreshPulse, setIdxRefreshPulse] = useState(false);
+
+  const handleRefresh = () => {
+    if (loading) return;
+    setIdxRefreshPulse(true);
+    setTimeout(() => setIdxRefreshPulse(false), 500);
+    refresh();
+  };
+
+  // How many indices have loaded so far
+  const loadedCount = Object.keys(data).length;
+
+  return (
+    <div style={{
+      marginBottom: 22,
+      animation: "slideUp .5s .1s cubic-bezier(.22,1,.36,1) both",
+    }}>
+
+      {/* ── Section header ── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 12, flexWrap: "wrap", gap: 8,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: 11,
+            background: "linear-gradient(135deg,rgba(99,149,255,0.28),rgba(99,149,255,0.10))",
+            border: "1px solid rgba(99,149,255,0.32)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 4px 16px rgba(99,149,255,0.22)",
+          }}>
+            <Activity size={16} style={{ color: "#6395ff" }} />
+          </div>
+          <div>
+            <h2 style={{
+              margin: 0, fontSize: 16, fontWeight: 800,
+              fontFamily: "'Syne',sans-serif",
+              color: "#6395ff",
+              textShadow: "0 0 24px rgba(99,149,255,0.50), 0 2px 4px rgba(0,0,0,0.4)",
+            }}>
+              Market Indices
+            </h2>
+            <span style={{ fontSize: 10, color: t.textMuted }}>
+              NIFTY 50 · SENSEX · BANK NIFTY · India
+            </span>
+          </div>
+
+          {/* LIVE dot — shown once at least one index has data */}
+          {!loading && loadedCount > 0 && !error && (
+            <span style={{
+              display: "flex", alignItems: "center", gap: 5,
+              fontSize: 9, padding: "2px 8px", borderRadius: 20,
+              background: "rgba(16,185,129,0.12)",
+              color: "#10b981",
+              border: "1px solid rgba(16,185,129,0.22)", fontWeight: 700,
+            }}>
+              <span style={{
+                width: 5, height: 5, borderRadius: "50%",
+                background: "#10b981", boxShadow: "0 0 6px #10b981",
+                animation: "glow-pulse 2s infinite",
+              }} />
+              LIVE
+            </span>
+          )}
+
+          {/* Subtle bg-refresh dot while polling */}
+          {loading && loadedCount > 0 && (
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "#6395ff", boxShadow: "0 0 8px #6395ff",
+              animation: "glow-pulse 1s ease-in-out infinite", flexShrink: 0,
+            }} />
+          )}
+        </div>
+
+        {/* Refresh button */}
+        <button
+          onClick={handleRefresh}
+          disabled={loading}
+          style={{
+            position: "relative", overflow: "hidden",
+            padding: "7px 10px", borderRadius: 10,
+            background: idxRefreshPulse ? "rgba(99,149,255,0.20)" : t.inputBg,
+            border: `1px solid ${idxRefreshPulse ? "rgba(99,149,255,0.50)" : t.border}`,
+            color: idxRefreshPulse ? "#6395ff" : t.textSecondary,
+            cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading && loadedCount === 0 ? 0.6 : 1,
+            transform: idxRefreshPulse ? "scale(0.88)" : "scale(1)",
+            boxShadow: idxRefreshPulse ? "0 0 16px rgba(99,149,255,0.40)" : "none",
+            transition: "all .18s cubic-bezier(.34,1.56,.64,1)",
+          }}
+          onMouseEnter={e => { if (!loading && !idxRefreshPulse) { e.currentTarget.style.background = "rgba(99,149,255,0.12)"; e.currentTarget.style.borderColor = "rgba(99,149,255,0.35)"; }}}
+          onMouseLeave={e => { if (!idxRefreshPulse) { e.currentTarget.style.background = t.inputBg; e.currentTarget.style.borderColor = t.border; }}}
+        >
+          <RefreshCw size={13} style={{
+            display: "block", transition: "transform .4s",
+            animation: loading ? "spin 0.7s linear infinite" : "none",
+            transform: idxRefreshPulse && !loading ? "rotate(-30deg)" : "rotate(0)",
+          }} />
+          {idxRefreshPulse && (
+            <span style={{
+              position: "absolute", inset: 0, borderRadius: 10,
+              background: "radial-gradient(circle,rgba(99,149,255,0.28) 0%,transparent 70%)",
+              animation: "sa-ripple .5s ease-out forwards", pointerEvents: "none",
+            }} />
+          )}
+        </button>
+      </div>
+
+      {/* ── Error banner ── */}
+      {error && (
+        <div style={{
+          background: "rgba(248,113,113,0.10)", border: "1px solid rgba(248,113,113,0.22)",
+          borderRadius: 14, padding: "10px 16px", marginBottom: 12,
+          color: "#fca5a5", fontSize: 12,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span>⚠ {error}</span>
+          <button onClick={handleRefresh} style={{
+            background: "none", border: "none", color: "#fca5a5",
+            cursor: "pointer", textDecoration: "underline", fontSize: 11,
+          }}>Retry</button>
+        </div>
+      )}
+
+      {/* ── 3-column cards grid ── */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: 12,
+      }}>
+        {INDEX_META.map((meta, i) => {
+          // d mirrors the shape returned by /stock/:symbol/quick
+          const d = data[meta.symbol] || null;
+          const isLoaded = !!d;
+
+          // changePercent may come as a string like "+0.42" or "-1.20"
+          const changePct   = d ? Number(d.changePercent) : 0;
+          const changeAbs   = d ? Number(d.change ?? 0)   : 0;
+          const up          = isLoaded ? changePct >= 0 : true;
+          const color       = up ? "#10b981" : "#f87171";
+          const sign        = up ? "+" : "";
+
+          return (
+             <div
+              key={meta.symbol}
+                  className="idx-card-hover"
+                      onClick={() => onAnalyze(meta.symbol)}
+                 style={{
+                             cursor: "pointer",
+                background: t.cardGradient,
+                border: `1px solid ${isLoaded ? color + "28" : t.border}`,
+                borderRadius: 18,
+                padding: "16px 16px 14px",
+                backdropFilter: "blur(24px) saturate(1.6)",
+                WebkitBackdropFilter: "blur(24px) saturate(1.6)",
+                boxShadow: isLoaded
+                  ? `${t.shadow}, 0 0 28px ${color}0d, inset 0 1px 0 ${t.glassEdge}`
+                  : `${t.shadow}, inset 0 1px 0 ${t.glassEdge}`,
+                transition: "all .25s cubic-bezier(.22,1,.36,1)",
+                position: "relative", overflow: "hidden",
+                animation: `idx-fade-in .4s cubic-bezier(.22,1,.36,1) ${i * 0.08}s both`
+              }}
+            >
+              {/* Top accent gradient line */}
+              {isLoaded && (
+                <div style={{
+                  position: "absolute", top: 0, left: 0, right: 0, height: 2,
+                  background: `linear-gradient(90deg, transparent, ${color}55, transparent)`,
+                  pointerEvents: "none",
+                }} />
+              )}
+
+              {/* Subtle bg glow */}
+              {isLoaded && (
+                <div style={{
+                  position: "absolute", top: -20, right: -20,
+                  width: 80, height: 80, borderRadius: "50%",
+                  background: `radial-gradient(circle, ${color}12, transparent 70%)`,
+                  pointerEvents: "none",
+                  animation: "glow-pulse 3.5s ease-in-out infinite",
+                }} />
+              )}
+
+              {/* Flag + Index name row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <span style={{ fontSize: 14, lineHeight: 1 }}>{meta.flag}</span>
+                <p style={{
+                  fontSize: 10, fontWeight: 700,
+                  color: t.textSecondary,
+                  margin: 0,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                }}>
+                  {meta.name}
+                </p>
+              </div>
+
+              {isLoaded ? (
+                <>
+                  {/* Price — same formatting as popular stocks */}
+                  <p style={{
+                    fontSize: 20, fontWeight: 800,
+                    color: t.textPrimary,
+                    margin: "0 0 6px",
+                    fontFamily: "'Syne',sans-serif",
+                    letterSpacing: "-0.04em",
+                    lineHeight: 1,
+                  }}>
+                    {/* currency comes from API response; fall back to meta.cur */}
+                    {(d.currency === "INR" || meta.cur === "₹") ? "₹" : "$"}
+                    {Number(d.price).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  </p>
+
+                  {/* Change value + % — identical pattern to popular stock cards */}
+                  <p style={{
+                    fontSize: 11, fontWeight: 700, color,
+                    margin: "0 0 5px",
+                    display: "flex", alignItems: "center", gap: 3,
+                  }}>
+                    {up
+                      ? <ArrowUpRight size={11} />
+                      : <ArrowDownRight size={11} />}
+                    {/* absolute change */}
+                    {sign}
+                    {(d.currency === "INR" || meta.cur === "₹") ? "₹" : "$"}
+                    {Math.abs(changeAbs).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    {/* percent change */}
+                    <span style={{ fontSize: 10, opacity: 0.85 }}>
+                      ({sign}{Math.abs(changePct).toFixed(2)}%)
+                    </span>
+                  </p>
+
+                  {/* Open price */}
+                  <p style={{ fontSize: 10, color: t.textMuted, margin: 0 }}>
+                    Open&nbsp;
+                    {(d.currency === "INR" || meta.cur === "₹") ? "₹" : "$"}
+                    {Number(d.open || d.price).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  </p>
+                </>
+              ) : (
+                /* Skeleton — same shimmer pattern as rest of the dashboard */
+                <>
+                  <div style={{
+                    height: 20, width: "72%", borderRadius: 5, marginBottom: 8,
+                    background: t.inputBg, backgroundSize: "200% 100%",
+                    animation: `mover-shimmer 1.4s ease-in-out ${i * 0.09}s infinite`,
+                  }} />
+                  <div style={{
+                    height: 11, width: "55%", borderRadius: 4, marginBottom: 6,
+                    background: t.inputBg, backgroundSize: "200% 100%",
+                    animation: `mover-shimmer 1.4s ease-in-out ${i * 0.09 + 0.1}s infinite`,
+                  }} />
+                  <div style={{
+                    height: 9, width: "40%", borderRadius: 4,
+                    background: t.inputBg, backgroundSize: "200% 100%",
+                    animation: `mover-shimmer 1.4s ease-in-out ${i * 0.09 + 0.2}s infinite`,
+                  }} />
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 };
 

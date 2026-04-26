@@ -176,7 +176,10 @@ const AIPrediction = ({ symbol }) => {
           display: "flex", alignItems: "center", gap: 7, color: t.textPrimary }}>
           <Brain size={15} style={{ color: t.accentSecond || "#a78bfa" }}/>
           AI Prediction Engine
-          <Badge label="LSTM · XGB · FinBERT"
+          <Badge label="Load -
+ Train -
+Analyze
+ -Merge"
             color={t.accentSecond || "#a78bfa"}
             bg="rgba(167,139,250,.1)" border="rgba(167,139,250,.2)"/>
         </p>
@@ -234,7 +237,7 @@ const AIPrediction = ({ symbol }) => {
             Click <strong style={{ color: t.accentSecond || "#a78bfa" }}>Run Prediction</strong> to start
           </p>
           <p style={{ fontSize: 11, margin: 0, color: t.textMuted }}>
-            Trains LSTM + XGBoost ensemble — takes ~60s first run
+           AI is analyzing — may take ~60s on first run
           </p>
         </div>
       )}
@@ -249,10 +252,10 @@ const AIPrediction = ({ symbol }) => {
             Training ensemble models…
           </p>
           <p style={{ fontSize: 11, color: t.textMuted, margin: 0 }}>
-            LSTM · GRU · TFT · XGBoost · LightGBM · FinBERT
+            "Hybrid AI Intelligence Engine"
           </p>
           <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 14 }}>
-            {["LSTM", "XGB", "FinBERT", "Meta"].map((m, i) => (
+            {["Loading", "Training", "Processing", "Aggregating"].map((m, i) => (
               <span key={m} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 20,
                 background: t.inputBg, border: `1px solid ${t.border}`,
                 color: t.textMuted, animation: `sa-pulse 1.5s ${i * 0.3}s infinite` }}>

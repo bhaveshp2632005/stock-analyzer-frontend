@@ -1,23 +1,20 @@
-import { io }      from "socket.io-client";
+import { io } from "socket.io-client";
 import { getToken, logout } from "../utils/auth.js";
 
-// Singleton socket
 let socket = null;
 
 export const getSocket = () => {
   if (!socket) {
     const token = getToken();
 
-    socket = io("http://localhost:5000", {
-      transports:          ["websocket"],
-      autoConnect:         true,
+    socket = io(import.meta.env.VITE_WS_URL, {
+      transports: ["websocket"],
+      autoConnect: true,
       reconnectionAttempts: 5,
-      reconnectionDelay:   2000,
-      // Send JWT token with every connection + reconnect
+      reconnectionDelay: 2000,
       auth: { token },
     });
 
-    // If server rejects socket due to invalid/expired token
     socket.on("connect_error", (err) => {
       if (
         err.message.includes("No token") ||
@@ -25,7 +22,7 @@ export const getSocket = () => {
         err.message.includes("expired")
       ) {
         console.warn("Socket auth failed:", err.message);
-        logout(true); // auto logout + redirect /login
+        logout(true);
       }
     });
   }
